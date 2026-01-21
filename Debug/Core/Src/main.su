@@ -1,0 +1,13 @@
+../Core/Src/main.c:80:6:GenerateSineTable	24	static
+../Core/Src/main.c:100:6:GenerateTriggerTable	16	static
+../Core/Src/main.c:113:6:UpdateScaledTable	16	static
+../Core/Src/main.c:124:6:UpdateTriggerTable	16	static
+../Core/Src/main.c:135:6:SetAmplitude	16	static
+../Core/Src/main.c:141:6:Setphase	16	static
+../Core/Src/main.c:149:6:SetFrequency	40	static
+../Core/Src/main.c:181:9:CalcCRC	24	static
+../Core/Src/main.c:190:6:ProcessFrame	24	static
+../Core/Src/main.c:215:5:main	16	static
+../Core/Src/main.c:273:6:SystemClock_Config	88	static
+../Core/Src/main.c:317:6:HAL_UART_RxCpltCallback	24	static
+../Core/Src/main.c:353:6:Error_Handler	4	static,ignoring_inline_asm
