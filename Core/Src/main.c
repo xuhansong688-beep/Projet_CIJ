@@ -60,8 +60,6 @@ uint8_t receiving = 0;
 uint32_t frame_timeout =0;
 uint16_t sine_table[MAX_TABLE_SIZE];
 uint16_t scaled_table[MAX_TABLE_SIZE];
-uint16_t dirac_table[MAX_TABLE_SIZE];
-uint16_t trigger_table[MAX_TABLE_SIZE];
 float amplitude_scale = 1.0f;
 uint16_t phase_offset = 0;
 uint16_t xx = 2048;
@@ -87,16 +85,6 @@ void GenerateSineTable(void)
 }
 
 
-void GenerateTriggerTable()
-{
-	for (int i = 0; i < TABLE_SIZE; i++) {
-	    trigger_table[i] = 0;
-	}
-	for (int i = 0; i < (TABLE_SIZE/10); i++) {
-		    trigger_table[i] = 4000;
-		}
-}
-
 void UpdateScaledTable(void)
 {
 	memset(scaled_table, 0, sizeof(scaled_table));
@@ -110,11 +98,11 @@ void UpdateScaledTable(void)
 
 void UpdateTriggerTable()
 {
-	memset(dirac_table, 0, sizeof(dirac_table));
+	memset(scaled_table, 0, sizeof(scaled_table));
 	for(int i = 0;i < TABLE_SIZE;i++)
 	{
 		int index = (i + phase_offset)% TABLE_SIZE;
-		dirac_table[index] = trigger_table[i];
+		scaled_table[index] = scaled_table[i];
 	}
 }
 
@@ -140,26 +128,32 @@ void SetFrequency(uint8_t freq,uint8_t amp,uint8_t phase)
     uint32_t real_freq = freq*1000;
     uint32_t timer_clk = 84000000;   // APB1 Timer Clock = 84MHz
     HAL_TIM_Base_Stop(&htim6);
+    HAL_TIM_Base_Stop(&htim2);
     HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
-    HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_2);
 
     if (real_freq > 80000)      TABLE_SIZE = 16;    // 80k~100kHz 16
         else if (real_freq > 32000) TABLE_SIZE = 32;    // 32k~80kHz 32
         else if (real_freq > 16000) TABLE_SIZE = 64;    // 16k~32kHz 64
         else                        TABLE_SIZE = 256;   // <16kHz 256
     GenerateSineTable();
-    GenerateTriggerTable();
     SetAmplitude(amp);
     Setphase(phase);
 
     uint32_t psc =0;
-    uint32_t arr = (timer_clk / (real_freq * TABLE_SIZE)) - 1;
+    uint32_t arr1 = (timer_clk / (real_freq * TABLE_SIZE)) - 1;
+    uint32_t arr2 = timer_clk/real_freq - 1;
+    uint32_t comp = arr2/5;
     htim6.Instance->PSC = psc;
-    htim6.Instance->ARR = arr;
+    htim6.Instance->ARR = arr1;
+    htim2.Instance->PSC = psc;
+    htim2.Instance->ARR = arr2;
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, comp);
+    __HAL_TIM_SET_COUNTER(&htim2, 0);
     __HAL_TIM_SET_COUNTER(&htim6, 0);
     HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)scaled_table, TABLE_SIZE, DAC_ALIGN_12B_R);
-    HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_2, (uint32_t*)dirac_table, TABLE_SIZE, DAC_ALIGN_12B_R);
     HAL_TIM_Base_Start(&htim6);
+    HAL_TIM_Base_Start(&htim2);
+    HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
 
 }
 
@@ -228,17 +222,16 @@ int main(void)
   MX_USART2_UART_Init();
   MX_DAC_Init();
   MX_TIM6_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 	HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
 	GenerateSineTable();
 	UpdateScaledTable();
-	GenerateTriggerTable();
-	UpdateTriggerTable();
 	HAL_TIM_Base_Start(&htim6);
+	HAL_TIM_Base_Start(&htim2);
+    HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
 	HAL_DAC_Stop(&hdac, DAC_CHANNEL_1);
-    HAL_DAC_Stop(&hdac, DAC_CHANNEL_2);
 	HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)scaled_table, TABLE_SIZE, DAC_ALIGN_12B_R);
-	HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_2, (uint32_t*)dirac_table, TABLE_SIZE, DAC_ALIGN_12B_R);
 
   /* USER CODE END 2 */
 

@@ -26,7 +26,6 @@
 
 DAC_HandleTypeDef hdac;
 DMA_HandleTypeDef hdma_dac1;
-DMA_HandleTypeDef hdma_dac2;
 
 /* DAC init function */
 void MX_DAC_Init(void)
@@ -58,13 +57,6 @@ void MX_DAC_Init(void)
   {
     Error_Handler();
   }
-
-  /** DAC channel OUT2 config
-  */
-  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
   /* USER CODE BEGIN DAC_Init 2 */
 
   /* USER CODE END DAC_Init 2 */
@@ -86,9 +78,8 @@ void HAL_DAC_MspInit(DAC_HandleTypeDef* dacHandle)
     __HAL_RCC_GPIOA_CLK_ENABLE();
     /**DAC GPIO Configuration
     PA4     ------> DAC_OUT1
-    PA5     ------> DAC_OUT2
     */
-    GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5;
+    GPIO_InitStruct.Pin = GPIO_PIN_4;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -112,24 +103,6 @@ void HAL_DAC_MspInit(DAC_HandleTypeDef* dacHandle)
 
     __HAL_LINKDMA(dacHandle,DMA_Handle1,hdma_dac1);
 
-    /* DAC2 Init */
-    hdma_dac2.Instance = DMA1_Stream6;
-    hdma_dac2.Init.Channel = DMA_CHANNEL_7;
-    hdma_dac2.Init.Direction = DMA_MEMORY_TO_PERIPH;
-    hdma_dac2.Init.PeriphInc = DMA_PINC_DISABLE;
-    hdma_dac2.Init.MemInc = DMA_MINC_ENABLE;
-    hdma_dac2.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
-    hdma_dac2.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
-    hdma_dac2.Init.Mode = DMA_CIRCULAR;
-    hdma_dac2.Init.Priority = DMA_PRIORITY_MEDIUM;
-    hdma_dac2.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
-    if (HAL_DMA_Init(&hdma_dac2) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
-    __HAL_LINKDMA(dacHandle,DMA_Handle2,hdma_dac2);
-
     /* DAC interrupt Init */
     HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 1, 0);
     HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
@@ -152,13 +125,11 @@ void HAL_DAC_MspDeInit(DAC_HandleTypeDef* dacHandle)
 
     /**DAC GPIO Configuration
     PA4     ------> DAC_OUT1
-    PA5     ------> DAC_OUT2
     */
-    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_4|GPIO_PIN_5);
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_4);
 
     /* DAC DMA DeInit */
     HAL_DMA_DeInit(dacHandle->DMA_Handle1);
-    HAL_DMA_DeInit(dacHandle->DMA_Handle2);
 
     /* DAC interrupt Deinit */
   /* USER CODE BEGIN DAC:TIM6_DAC_IRQn disable */
