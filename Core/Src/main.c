@@ -116,7 +116,8 @@ void SetAmplitude(uint8_t amp)
 
 void Setphase(uint8_t phase)
 {
-	phase_offset = phase;
+	uint8_t phase_midi = (phase + 90)*TABLE_SIZE/360;
+	phase_offset = phase_midi;
 	UpdateTriggerTable();
 }
 
