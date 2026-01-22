@@ -140,14 +140,16 @@ void SetFrequency(uint8_t freq,uint8_t amp,uint8_t phase)
     Setphase(phase);
 
     uint32_t psc =0;
-    uint32_t arr1 = (timer_clk / (real_freq * TABLE_SIZE)) - 1;
-    uint32_t arr2 = timer_clk/real_freq - 1;
-    uint32_t comp = arr2/5;
+    uint32_t arr_base = (timer_clk/real_freq);
+    uint32_t arr_dac = (arr_base/TABLE_SIZE);
+    uint32_t final_arr_pwm = (arr_dac*TABLE_SIZE) -1;
+    uint32_t final_arr_dac = arr_dac -1;
+    uint32_t comp = final_arr_pwm/5;
 
     htim2.Instance->PSC = psc;
-    htim2.Instance->ARR = arr2;
+    htim2.Instance->ARR = final_arr_pwm;
     htim6.Instance->PSC = psc;
-    htim6.Instance->ARR = arr1;
+    htim6.Instance->ARR = final_arr_dac;
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, comp);
     __HAL_TIM_SET_COUNTER(&htim2, 0);
     __HAL_TIM_SET_COUNTER(&htim6, 0);
