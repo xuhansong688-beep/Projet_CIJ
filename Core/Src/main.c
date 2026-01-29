@@ -54,7 +54,8 @@
 /* USER CODE BEGIN PV */
 volatile uint16_t TABLE_SIZE =32;
 uint8_t rx_byte;
-uint8_t frame_buf[FRAME_SIZE];
+uint8_t trigger_period = 10; //modifier le period de trigger
+uint16_t frame_buf[FRAME_SIZE];
 uint8_t frame_index = 0;
 uint8_t receiving = 0;
 uint32_t frame_timeout =0;
@@ -76,6 +77,7 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 
 
+// Initialisation : écrire les valeurs de la fonction sinus de base
 void GenerateSineTable(void)
 {
     for (int i = 0; i < TABLE_SIZE; i++)
@@ -85,10 +87,15 @@ void GenerateSineTable(void)
     }
 }
 
-
+// Ajuster le tableau sinus en fonction de l'amplitude d'entrée
 void UpdateScaledTable(void)
 {
+	//   Vider le tableau de mise à l'échelle de l'amplitude du sinus,
+	//   initialiser tous les éléments à 0
 	memset(sineamp_table, 0, sizeof(sineamp_table));
+
+	//   Parcourir le tableau sinus original et calculer la mise
+	//   à l'échelle de l'amplitude pour chaque élément
     for (int i = 0; i < TABLE_SIZE; i++)
     {
         float centered = sine_table[i] - xx;
@@ -97,9 +104,12 @@ void UpdateScaledTable(void)
     }
 }
 
-void UpdateTriggerTable()
+// Ajuster le tableau sinus en fonction de le phase d'entrée
+void Updatephase()
 {
 	memset(sinphase_table, 0, sizeof(sinphase_table));
+	//    Parcourir le tableau de mise à l'échelle d'amplitude et
+	//    remplir le tableau de phase via le décalage de phase
 	for(int i = 0;i < TABLE_SIZE;i++)
 	{
 		int index = (i + phase_offset)% TABLE_SIZE;
@@ -114,24 +124,25 @@ void SetAmplitude(uint8_t amp)
     UpdateScaledTable();
 }
 
-void Setphase(uint8_t phase)
+void Setphase(uint16_t phase)
 {
-	uint8_t phase_midi = (phase + 90)*TABLE_SIZE/360;
+	uint16_t phase_midi = phase*TABLE_SIZE/360;
 	phase_offset = phase_midi;
-	UpdateTriggerTable();
+	Updatephase();
 }
 
 
 
-void SetFrequency(uint8_t freq,uint8_t amp,uint8_t phase)
+void SetFrequency(uint8_t freq,uint8_t amp,uint16_t phase)
 {
     if (freq == 0) return;
 
-    uint32_t real_freq = freq*1000;
+    uint32_t real_freq = freq*1000;  //
     uint32_t timer_clk = 84000000;   // APB1 Timer Clock = 84MHz
     HAL_TIM_Base_Stop(&htim6);
     HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
 
+    // Modifier la taille du tableau pour faciliter la sortie
     if (real_freq > 80000)      TABLE_SIZE = 16;    // 80k~100kHz 16
         else if (real_freq > 32000) TABLE_SIZE = 32;    // 32k~80kHz 32
         else if (real_freq > 16000) TABLE_SIZE = 64;    // 16k~32kHz 64
@@ -140,13 +151,15 @@ void SetFrequency(uint8_t freq,uint8_t amp,uint8_t phase)
     SetAmplitude(amp);
     Setphase(phase);
 
+    // Calculer la PWM sur TIM2 et la sortie DMA sur TIM6 en modifiant ARR et PSC
     uint32_t psc =0;
     uint32_t arr_base = (timer_clk/real_freq);
     uint32_t arr_dac = (arr_base/TABLE_SIZE);
     uint32_t final_arr_pwm = (arr_dac*TABLE_SIZE) -1;
     uint32_t final_arr_dac = arr_dac -1;
-    uint32_t comp = final_arr_pwm/5;
+    uint32_t comp = final_arr_pwm/trigger_period;
 
+    //eable le tim
     htim2.Instance->PSC = psc;
     htim2.Instance->ARR = final_arr_pwm;
     htim6.Instance->PSC = psc;
@@ -162,26 +175,26 @@ void SetFrequency(uint8_t freq,uint8_t amp,uint8_t phase)
 
 
 
-uint8_t CalcCRC(uint8_t *buf)
+uint16_t CalcCRC(uint16_t *buf)
 {
-    uint8_t sum = 0;
+    uint16_t sum = 0;
     sum += buf[1];  // F
     sum += buf[2];  // A
     sum += buf[3];  // P
     return sum & 0xFF;
 }
 
-void ProcessFrame(uint8_t *buf)
+void ProcessFrame(uint16_t *buf)
 {
     if (buf[0] != 0xAA)
         return;
 
-    uint8_t freq  = buf[1];
-    uint8_t amp   = buf[2];
-    uint8_t phase = buf[3];
-    uint8_t crc   = buf[4];
+    uint8_t freq  = (uint8_t)buf[1];
+    uint8_t amp   = (uint8_t)buf[2];
+    uint16_t phase = buf[3];
+    uint8_t crc   = (uint8_t)buf[4];
 
-    uint8_t calc = CalcCRC(buf);
+    uint16_t calc = CalcCRC(buf);
     if (calc != crc)
         return;
 

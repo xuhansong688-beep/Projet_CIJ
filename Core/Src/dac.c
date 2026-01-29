@@ -95,7 +95,10 @@ void HAL_DAC_MspInit(DAC_HandleTypeDef* dacHandle)
     hdma_dac1.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
     hdma_dac1.Init.Mode = DMA_CIRCULAR;
     hdma_dac1.Init.Priority = DMA_PRIORITY_HIGH;
-    hdma_dac1.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    hdma_dac1.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+    hdma_dac1.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_HALFFULL;
+    hdma_dac1.Init.MemBurst = DMA_MBURST_SINGLE;
+    hdma_dac1.Init.PeriphBurst = DMA_PBURST_SINGLE;
     if (HAL_DMA_Init(&hdma_dac1) != HAL_OK)
     {
       Error_Handler();
@@ -104,7 +107,7 @@ void HAL_DAC_MspInit(DAC_HandleTypeDef* dacHandle)
     __HAL_LINKDMA(dacHandle,DMA_Handle1,hdma_dac1);
 
     /* DAC interrupt Init */
-    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 1, 0);
+    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
   /* USER CODE BEGIN DAC_MspInit 1 */
 

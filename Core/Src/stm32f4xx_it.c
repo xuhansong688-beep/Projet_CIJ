@@ -245,10 +245,10 @@ void TIM6_DAC_IRQHandler(void)
 
 /* USER CODE BEGIN 1 */
 extern uint8_t rx_byte;
-extern uint8_t frame_buf[5];
+extern uint16_t frame_buf[5];
 extern uint8_t frame_index;
 extern uint8_t receiving;
-void ProcessFrame(uint8_t *buf);
+void ProcessFrame(uint16_t *buf);
 
 
 
