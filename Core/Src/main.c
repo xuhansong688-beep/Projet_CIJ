@@ -39,7 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define FRAME_SIZE 5       // AA F A P CRC
+#define FRAME_SIZE 6       // AA F A P CRC
 #define MAX_TABLE_SIZE 256
 #define FRAME_TIMEOUT_MS 10
 /* USER CODE END PD */
@@ -55,7 +55,7 @@
 volatile uint16_t TABLE_SIZE =32;
 uint8_t rx_byte;
 uint8_t trigger_period = 10; //modifier le period de trigger
-uint16_t frame_buf[FRAME_SIZE];
+uint8_t frame_buf[FRAME_SIZE];
 uint8_t frame_index = 0;
 uint8_t receiving = 0;
 uint32_t frame_timeout =0;
@@ -175,28 +175,29 @@ void SetFrequency(uint8_t freq,uint8_t amp,uint16_t phase)
 
 
 
-uint16_t CalcCRC(uint16_t *buf)
+uint8_t CalcCRC(uint8_t *buf)
 {
-    uint16_t sum = 0;
+    uint8_t sum = 0;
     sum += buf[1];  // F
     sum += buf[2];  // A
     sum += buf[3];  // P
+    sum += buf[4];
     return sum & 0xFF;
 }
 
-void ProcessFrame(uint16_t *buf)
+void ProcessFrame(uint8_t *buf)
 {
     if (buf[0] != 0xAA)
         return;
 
-    uint8_t freq  = (uint8_t)buf[1];
-    uint8_t amp   = (uint8_t)buf[2];
-    uint16_t phase = buf[3];
-    uint8_t crc   = (uint8_t)buf[4];
+    uint8_t freq  = buf[1];
+    uint8_t amp   = buf[2];
+    uint16_t phase = buf[3] + (buf[4] << 8);
+    uint8_t crc   = buf[5];
 
-    uint16_t calc = CalcCRC(buf);
-    if (calc != crc)
-        return;
+    uint8_t calc = CalcCRC(buf);
+    if (calc != crc){
+        return;}
 
     SetFrequency(freq,amp,phase);
 
@@ -328,7 +329,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	        else
 	        {
 	            frame_buf[frame_index++] = b;
-	            if (frame_index >= 5)
+	            if (frame_index >= 6)
 	            {
 	                receiving = 0;
 
