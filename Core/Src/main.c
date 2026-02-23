@@ -40,6 +40,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define FRAME_SIZE 6       // AA F A P CRC
+#define RESP_FRAME_SIZE 8  // BB ARR_H ARR_L FREQ_H FREQ_M FREQ_L CRC1 CRC2
 #define MAX_TABLE_SIZE 256
 #define FRAME_TIMEOUT_MS 10
 /* USER CODE END PD */
@@ -56,6 +57,7 @@ volatile uint16_t TABLE_SIZE =32;
 uint8_t rx_byte;
 uint8_t trigger_period = 10; //modifier le period de trigger
 uint8_t frame_buf[FRAME_SIZE];
+uint8_t resp_buf[RESP_FRAME_SIZE]; // 响应帧缓冲区
 uint8_t frame_index = 0;
 uint8_t receiving = 0;
 uint32_t frame_timeout =0;
@@ -70,12 +72,49 @@ uint16_t xx = 2048;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+void SendResponseFrame(uint32_t arr, uint32_t real_freq); // 新增响应帧发送函数
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+// 计算响应帧的校验和
+uint16_t CalcRespCRC(uint8_t *buf, uint8_t len)
+{
+    uint16_t sum = 0;
+    for(uint8_t i=0; i<len-2; i++) // 前6个字节参与校验
+    {
+        sum += buf[i];
+    }
+    return sum;
+}
+
+// 发送响应帧（包含ARR和实际频率）
+void SendResponseFrame(uint32_t arr, uint32_t real_freq)
+{
+    // 清空响应缓冲区
+    memset(resp_buf, 0, sizeof(resp_buf));
+
+    // 帧头：0xBB标识响应帧
+    resp_buf[0] = 0xBB;
+
+    // ARR值（16位）：高字节 + 低字节
+    resp_buf[1] = (arr >> 8) & 0xFF;
+    resp_buf[2] = arr & 0xFF;
+
+    // 实际频率（32位，取低24位）：高字节 + 中字节 + 低字节
+    resp_buf[3] = (real_freq >> 16) & 0xFF;
+    resp_buf[4] = (real_freq >> 8) & 0xFF;
+    resp_buf[5] = real_freq & 0xFF;
+
+    // 计算校验和（16位拆分为两个8位）
+    uint16_t crc = CalcRespCRC(resp_buf, RESP_FRAME_SIZE);
+    resp_buf[6] = (crc >> 8) & 0xFF;
+    resp_buf[7] = crc & 0xFF;
+
+    // 通过串口发送响应帧
+    HAL_UART_Transmit(&huart2, resp_buf, RESP_FRAME_SIZE, 100);
+}
 
 // Initialisation : écrire les valeurs de la fonction sinus de base
 void GenerateSineTable(void)
@@ -117,7 +156,6 @@ void Updatephase()
 	}
 }
 
-
 void SetAmplitude(uint8_t amp)
 {
     amplitude_scale = (float)amp / 255.0f;;
@@ -131,21 +169,19 @@ void Setphase(uint16_t phase)
 	Updatephase();
 }
 
-
-
 void SetFrequency(uint8_t freq,uint8_t amp,uint16_t phase)
 {
     if (freq == 0) return;
 
-    uint32_t real_freq = freq*1000;  //
+    uint32_t target_freq = freq*1000;  // 目标频率(Hz)
     uint32_t timer_clk = 84000000;   // APB1 Timer Clock = 84MHz
     HAL_TIM_Base_Stop(&htim6);
     HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
 
     // Modifier la taille du tableau pour faciliter la sortie
-    if (real_freq > 80000)      TABLE_SIZE = 16;    // 80k~100kHz 16
-        else if (real_freq > 32000) TABLE_SIZE = 32;    // 32k~80kHz 32
-        else if (real_freq > 16000) TABLE_SIZE = 64;    // 16k~32kHz 64
+    if (target_freq > 80000)      TABLE_SIZE = 16;    // 80k~100kHz 16
+        else if (target_freq > 32000) TABLE_SIZE = 32;    // 32k~80kHz 32
+        else if (target_freq > 16000) TABLE_SIZE = 64;    // 16k~32kHz 64
         else                        TABLE_SIZE = 256;   // <16kHz 256
     GenerateSineTable();
     SetAmplitude(amp);
@@ -153,11 +189,14 @@ void SetFrequency(uint8_t freq,uint8_t amp,uint16_t phase)
 
     // Calculer la PWM sur TIM2 et la sortie DMA sur TIM6 en modifiant ARR et PSC
     uint32_t psc =0;
-    uint32_t arr_base = (timer_clk/real_freq);
+    uint32_t arr_base = (timer_clk/target_freq);
     uint32_t arr_dac = (arr_base/TABLE_SIZE);
     uint32_t final_arr_pwm = (arr_dac*TABLE_SIZE) -1;
     uint32_t final_arr_dac = arr_dac -1;
     uint32_t comp = final_arr_pwm/trigger_period;
+
+    // 计算实际能实现的频率（关键：反推真实频率）
+    uint32_t real_freq = timer_clk / (TABLE_SIZE * (final_arr_dac + 1));
 
     //eable le tim
     htim2.Instance->PSC = psc;
@@ -171,9 +210,9 @@ void SetFrequency(uint8_t freq,uint8_t amp,uint16_t phase)
     HAL_TIM_Base_Start(&htim6);
     HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
 
+    // 发送响应帧：包含DAC的ARR值和实际频率
+    SendResponseFrame(final_arr_dac, real_freq);
 }
-
-
 
 uint8_t CalcCRC(uint8_t *buf)
 {
@@ -200,8 +239,6 @@ void ProcessFrame(uint8_t *buf)
         return;}
 
     SetFrequency(freq,amp,phase);
-
-
 }
 
 /* USER CODE END 0 */
@@ -212,7 +249,6 @@ void ProcessFrame(uint8_t *buf)
   */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -241,14 +277,14 @@ int main(void)
   MX_TIM6_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-	HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
-	GenerateSineTable();
-	UpdateScaledTable();
-	HAL_TIM_Base_Start(&htim6);
-	HAL_TIM_Base_Start(&htim2);
-    HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
-	HAL_DAC_Stop(&hdac, DAC_CHANNEL_1);
-	HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)sinphase_table, TABLE_SIZE, DAC_ALIGN_12B_R);
+  HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
+  GenerateSineTable();
+  UpdateScaledTable();
+  HAL_TIM_Base_Start(&htim6);
+  HAL_TIM_Base_Start(&htim2);
+  HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
+  HAL_DAC_Stop(&hdac, DAC_CHANNEL_1);
+  HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)sinphase_table, TABLE_SIZE, DAC_ALIGN_12B_R);
 
   /* USER CODE END 2 */
 
@@ -312,34 +348,33 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-	{
-	    if (huart->Instance == USART2)
-	    {
-	        uint8_t b = rx_byte;
+{
+    if (huart->Instance == USART2)
+    {
+        uint8_t b = rx_byte;
 
-	        if (!receiving)
-	        {
-	            if (b == 0xAA)
-	            {
-	                receiving = 1;
-	                frame_index = 0;
-	                frame_buf[frame_index++] = b;
-	            }
-	        }
-	        else
-	        {
-	            frame_buf[frame_index++] = b;
-	            if (frame_index >= 6)
-	            {
-	                receiving = 0;
+        if (!receiving)
+        {
+            if (b == 0xAA)
+            {
+                receiving = 1;
+                frame_index = 0;
+                frame_buf[frame_index++] = b;
+            }
+        }
+        else
+        {
+            frame_buf[frame_index++] = b;
+            if (frame_index >= 6)
+            {
+                receiving = 0;
+                ProcessFrame(frame_buf);
+            }
+        }
 
-	                ProcessFrame(frame_buf);
-	            }
-	        }
-
-	        HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
-	    }
-	}
+        HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
+    }
+}
 
 /* USER CODE END 4 */
 
