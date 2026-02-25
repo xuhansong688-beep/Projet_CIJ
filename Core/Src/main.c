@@ -39,7 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define FRAME_SIZE 6       // AA F A P CRC
+#define FRAME_SIZE 8       // AA F(octet faible) F(octet medium) F(octet fort) A P(octet faible) P((octet fort) CRC
 #define RESP_FRAME_SIZE 8  // BB ARR_H ARR_L FREQ_H FREQ_M FREQ_L CRC1 CRC2
 #define MAX_TABLE_SIZE 256
 #define FRAME_TIMEOUT_MS 10
@@ -53,7 +53,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-volatile uint16_t TABLE_SIZE =32;
+volatile uint16_t NUMBER_OF_SAMPLE =32;
 uint8_t rx_byte;
 uint8_t trigger_period = 10; //modifier le period de trigger
 uint8_t frame_buf[FRAME_SIZE];
@@ -72,56 +72,57 @@ uint16_t xx = 2048;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-void SendResponseFrame(uint32_t arr, uint32_t real_freq); // 新增响应帧发送函数
+void SendResponseFrame(uint32_t arr, uint32_t real_freq); // 新增响应帧发送函�?
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-// 计算响应帧的校验和
+// Calculer la somme de contrôle (CRC) de la trame de réponse
 uint16_t CalcRespCRC(uint8_t *buf, uint8_t len)
 {
     uint16_t sum = 0;
-    for(uint8_t i=0; i<len-2; i++) // 前6个字节参与校验
+    for(uint8_t i=0; i<len-2; i++) // Les 6 premiers octets participent au calcul
     {
         sum += buf[i];
     }
     return sum;
 }
 
-// 发送响应帧（包含ARR和实际频率）
+// Envoyer la trame de réponse (contient l'ARR et la fréquence réelle)
 void SendResponseFrame(uint32_t arr, uint32_t real_freq)
 {
-    // 清空响应缓冲区
+    // Effacer le tampon de réponse
     memset(resp_buf, 0, sizeof(resp_buf));
 
-    // 帧头：0xBB标识响应帧
+    // En-tête de trame : 0xBB identifie une réponse
     resp_buf[0] = 0xBB;
 
-    // ARR值（16位）：高字节 + 低字节
+    // Valeur ARR (16 bits) : Octet fort + Octet faible
     resp_buf[1] = (arr >> 8) & 0xFF;
     resp_buf[2] = arr & 0xFF;
 
-    // 实际频率（32位，取低24位）：高字节 + 中字节 + 低字节
+    // Fréquence réelle (32 bits, récupération des 24 bits de poids faible) :
+    // Octet fort + Octet moyen + Octet faible
     resp_buf[3] = (real_freq >> 16) & 0xFF;
     resp_buf[4] = (real_freq >> 8) & 0xFF;
     resp_buf[5] = real_freq & 0xFF;
 
-    // 计算校验和（16位拆分为两个8位）
+    // Calculer la somme de contrôle (CRC sur 16 bits divisé en deux octets de 8 bits)
     uint16_t crc = CalcRespCRC(resp_buf, RESP_FRAME_SIZE);
     resp_buf[6] = (crc >> 8) & 0xFF;
     resp_buf[7] = crc & 0xFF;
 
-    // 通过串口发送响应帧
+    // Transmettre la trame de réponse via le port série (UART)
     HAL_UART_Transmit(&huart2, resp_buf, RESP_FRAME_SIZE, 100);
 }
 
 // Initialisation : écrire les valeurs de la fonction sinus de base
 void GenerateSineTable(void)
 {
-    for (int i = 0; i < TABLE_SIZE; i++)
+    for (int i = 0; i < NUMBER_OF_SAMPLE; i++)
     {
-        float angle = 2.0f * 3.1415926f * i / TABLE_SIZE;
+        float angle = 2.0f * 3.1415926f * i / NUMBER_OF_SAMPLE;
         sine_table[i] = (uint16_t)(xx + (xx-1) * sinf(angle));
     }
 }
@@ -135,7 +136,7 @@ void UpdateScaledTable(void)
 
 	//   Parcourir le tableau sinus original et calculer la mise
 	//   à l'échelle de l'amplitude pour chaque élément
-    for (int i = 0; i < TABLE_SIZE; i++)
+    for (int i = 0; i < NUMBER_OF_SAMPLE; i++)
     {
         float centered = sine_table[i] - xx;
         centered *= amplitude_scale;
@@ -149,9 +150,9 @@ void Updatephase()
 	memset(sinphase_table, 0, sizeof(sinphase_table));
 	//    Parcourir le tableau de mise à l'échelle d'amplitude et
 	//    remplir le tableau de phase via le décalage de phase
-	for(int i = 0;i < TABLE_SIZE;i++)
+	for(int i = 0;i < NUMBER_OF_SAMPLE;i++)
 	{
-		int index = (i + phase_offset)% TABLE_SIZE;
+		int index = (i + phase_offset)% NUMBER_OF_SAMPLE;
 		sinphase_table[index] = sineamp_table[i];
 	}
 }
@@ -164,39 +165,39 @@ void SetAmplitude(uint8_t amp)
 
 void Setphase(uint16_t phase)
 {
-	uint16_t phase_midi = phase*TABLE_SIZE/360;
+	uint16_t phase_midi = phase*NUMBER_OF_SAMPLE/360;
 	phase_offset = phase_midi;
 	Updatephase();
 }
 
-void SetFrequency(uint8_t freq,uint8_t amp,uint16_t phase)
+void SetFrequency(uint32_t freq,uint8_t amp,uint16_t phase)
 {
     if (freq == 0) return;
-
-    uint32_t target_freq = freq*1000;  // 目标频率(Hz)
     uint32_t timer_clk = 84000000;   // APB1 Timer Clock = 84MHz
     HAL_TIM_Base_Stop(&htim6);
     HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
 
     // Modifier la taille du tableau pour faciliter la sortie
-    if (target_freq > 80000)      TABLE_SIZE = 16;    // 80k~100kHz 16
-        else if (target_freq > 32000) TABLE_SIZE = 32;    // 32k~80kHz 32
-        else if (target_freq > 16000) TABLE_SIZE = 64;    // 16k~32kHz 64
-        else                        TABLE_SIZE = 256;   // <16kHz 256
+    if (freq > 80000)      NUMBER_OF_SAMPLE = 16;    // 80k~100kHz 16
+        else if (freq > 32000) NUMBER_OF_SAMPLE = 32;    // 32k~80kHz 32
+        else if (freq > 16000) NUMBER_OF_SAMPLE = 64;    // 16k~32kHz 64
+        else                        NUMBER_OF_SAMPLE = 256;   // <16kHz 256
     GenerateSineTable();
     SetAmplitude(amp);
     Setphase(phase);
 
     // Calculer la PWM sur TIM2 et la sortie DMA sur TIM6 en modifiant ARR et PSC
     uint32_t psc =0;
-    uint32_t arr_base = (timer_clk/target_freq);
-    uint32_t arr_dac = (arr_base/TABLE_SIZE);
-    uint32_t final_arr_pwm = (arr_dac*TABLE_SIZE) -1;
+    float total_ticks = (float)timer_clk / (float)freq;
+    uint32_t arr_base = (uint32_t)roundf(total_ticks);
+    total_ticks = (float)arr_base / (float)NUMBER_OF_SAMPLE;
+    uint32_t arr_dac = (uint32_t)roundf(total_ticks);
+    uint32_t final_arr_pwm = (arr_dac*NUMBER_OF_SAMPLE) -1;
     uint32_t final_arr_dac = arr_dac -1;
     uint32_t comp = final_arr_pwm/trigger_period;
 
-    // 计算实际能实现的频率（关键：反推真实频率）
-    uint32_t real_freq = timer_clk / (TABLE_SIZE * (final_arr_dac + 1));
+    // 计算实际能实现的频率（关键：反推真实频率�?
+    uint32_t real_freq = timer_clk / (NUMBER_OF_SAMPLE * (final_arr_dac + 1));
 
     //eable le tim
     htim2.Instance->PSC = psc;
@@ -206,21 +207,20 @@ void SetFrequency(uint8_t freq,uint8_t amp,uint16_t phase)
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, comp);
     __HAL_TIM_SET_COUNTER(&htim2, 0);
     __HAL_TIM_SET_COUNTER(&htim6, 0);
-    HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)sinphase_table, TABLE_SIZE, DAC_ALIGN_12B_R);
+    HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)sinphase_table, NUMBER_OF_SAMPLE, DAC_ALIGN_12B_R);
     HAL_TIM_Base_Start(&htim6);
     HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
 
-    // 发送响应帧：包含DAC的ARR值和实际频率
+    // 发�?�响应帧：包含DAC的ARR值和实际频率
     SendResponseFrame(final_arr_dac, real_freq);
 }
 
 uint8_t CalcCRC(uint8_t *buf)
 {
     uint8_t sum = 0;
-    sum += buf[1];  // F
-    sum += buf[2];  // A
-    sum += buf[3];  // P
-    sum += buf[4];
+    for(uint8_t i=1;i<7;i++){
+    sum += buf[i];
+    }
     return sum & 0xFF;
 }
 
@@ -229,10 +229,10 @@ void ProcessFrame(uint8_t *buf)
     if (buf[0] != 0xAA)
         return;
 
-    uint8_t freq  = buf[1];
-    uint8_t amp   = buf[2];
-    uint16_t phase = buf[3] + (buf[4] << 8);
-    uint8_t crc   = buf[5];
+    uint32_t freq  = buf[1]+(buf[2] << 8)+(buf[3]<<16);
+    uint8_t amp   = buf[4];
+    uint16_t phase = buf[5] + (buf[6] << 8);
+    uint8_t crc   = buf[7];
 
     uint8_t calc = CalcCRC(buf);
     if (calc != crc){
@@ -249,6 +249,7 @@ void ProcessFrame(uint8_t *buf)
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -284,7 +285,7 @@ int main(void)
   HAL_TIM_Base_Start(&htim2);
   HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
   HAL_DAC_Stop(&hdac, DAC_CHANNEL_1);
-  HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)sinphase_table, TABLE_SIZE, DAC_ALIGN_12B_R);
+  HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)sinphase_table, NUMBER_OF_SAMPLE, DAC_ALIGN_12B_R);
 
   /* USER CODE END 2 */
 
@@ -321,9 +322,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 16;
-  RCC_OscInitStruct.PLL.PLLN = 336;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 84;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
@@ -338,7 +339,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
@@ -365,7 +366,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         else
         {
             frame_buf[frame_index++] = b;
-            if (frame_index >= 6)
+            if (frame_index >= 8)
             {
                 receiving = 0;
                 ProcessFrame(frame_buf);
