@@ -39,7 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define FRAME_SIZE 8       // AA F(octet faible) F(octet medium) F(octet fort) A P(octet faible) P((octet fort) CRC
+#define FRAME_SIZE 11       // AA F(octet faible) F(octet medium) F(octet fort) A1 H1 A2 H2 P(octet faible) P((octet fort) CRC
 #define RESP_FRAME_SIZE 8  // BB ARR_H ARR_L FREQ_H FREQ_M FREQ_L CRC1 CRC2
 #define MAX_TABLE_SIZE 256
 #define FRAME_TIMEOUT_MS 10
@@ -118,17 +118,20 @@ void SendResponseFrame(uint32_t arr, uint32_t real_freq)
 }
 
 // Initialisation : écrire les valeurs de la fonction sinus de base
-void GenerateSineTable(void)
+void GenerateSineTable(uint8_t amp1,uint8_t harm1,uint8_t amp2,uint8_t harm2)
 {
     for (int i = 0; i < NUMBER_OF_SAMPLE; i++)
     {
-        float angle = 2.0f * 3.1415926f * i / NUMBER_OF_SAMPLE;
-        sine_table[i] = (uint16_t)(xx + (xx-1) * sinf(angle));
+        //float angle = 2.0f * 3.1415926f * i / NUMBER_OF_SAMPLE;
+        //sine_table[i] = (uint16_t)(xx + (xx-1) * sinf(angle));
+        float angle_1 = 2.0f * 3.1415926f * i * harm1 / NUMBER_OF_SAMPLE;
+        float angle_2 = 2.0f * 3.1415926f * i * harm2 / NUMBER_OF_SAMPLE;
+        sine_table[i] = (uint16_t)(xx + (xx-1)*(amp1)/(amp1+amp2)* sinf(angle_1) + (xx-1)*(amp2)/(amp1+amp2)* sinf(angle_2)); // Avec A1 + A2 <= 255
     }
 }
 
 // Ajuster le tableau sinus en fonction de l'amplitude d'entrée
-void UpdateScaledTable(void)
+/*void UpdateScaledTable(void)
 {
 	//   Vider le tableau de mise à l'échelle de l'amplitude du sinus,
 	//   initialiser tous les éléments à 0
@@ -143,6 +146,7 @@ void UpdateScaledTable(void)
         sineamp_table[i] = (uint16_t)(xx + centered);
     }
 }
+*/
 
 // Ajuster le tableau sinus en fonction de le phase d'entrée
 void Updatephase()
@@ -153,16 +157,16 @@ void Updatephase()
 	for(int i = 0;i < NUMBER_OF_SAMPLE;i++)
 	{
 		int index = (i + phase_offset)% NUMBER_OF_SAMPLE;
-		sinphase_table[index] = sineamp_table[i];
+		sinphase_table[index] = sine_table[i];
 	}
 }
 
-void SetAmplitude(uint8_t amp)
+/*void SetAmplitude(uint8_t amp)
 {
     amplitude_scale = (float)amp / 255.0f;;
     UpdateScaledTable();
 }
-
+*/
 void Setphase(uint16_t phase)
 {
 	uint16_t phase_midi = phase*NUMBER_OF_SAMPLE/360;
@@ -170,7 +174,7 @@ void Setphase(uint16_t phase)
 	Updatephase();
 }
 
-void SetFrequency(uint32_t freq,uint8_t amp,uint16_t phase)
+void SetFrequency(uint32_t freq,uint8_t amp1,uint8_t harm1,uint8_t amp2,uint8_t harm2,uint16_t phase)
 {
     if (freq == 0) return;
     uint32_t timer_clk = 84000000;   // APB1 Timer Clock = 84MHz
@@ -182,8 +186,8 @@ void SetFrequency(uint32_t freq,uint8_t amp,uint16_t phase)
         else if (freq > 32000) NUMBER_OF_SAMPLE = 32;    // 32k~80kHz 32
         else if (freq > 16000) NUMBER_OF_SAMPLE = 64;    // 16k~32kHz 64
         else                        NUMBER_OF_SAMPLE = 256;   // <16kHz 256
-    GenerateSineTable();
-    SetAmplitude(amp);
+    GenerateSineTable(amp1,harm1,amp2,harm2);
+    //SetAmplitude(amp);
     Setphase(phase);
 
     // Calculer la PWM sur TIM2 et la sortie DMA sur TIM6 en modifiant ARR et PSC
@@ -196,7 +200,7 @@ void SetFrequency(uint32_t freq,uint8_t amp,uint16_t phase)
     uint32_t final_arr_dac = arr_dac -1;
     uint32_t comp = final_arr_pwm/trigger_period;
 
-    // 计算实际能实现的频率（关键：反推真实频率�?
+    // Calcul de la fréquence réelle réalisable
     uint32_t real_freq = timer_clk / (NUMBER_OF_SAMPLE * (final_arr_dac + 1));
 
     //eable le tim
@@ -211,14 +215,14 @@ void SetFrequency(uint32_t freq,uint8_t amp,uint16_t phase)
     HAL_TIM_Base_Start(&htim6);
     HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
 
-    // 发�?�响应帧：包含DAC的ARR值和实际频率
+    // Émission de la trame de réponse : incluant la valeur ARR du DAC et la fréquence réelle.
     SendResponseFrame(final_arr_dac, real_freq);
 }
 
 uint8_t CalcCRC(uint8_t *buf)
 {
     uint8_t sum = 0;
-    for(uint8_t i=1;i<7;i++){
+    for(uint8_t i=1;i<10;i++){
     sum += buf[i];
     }
     return sum & 0xFF;
@@ -230,15 +234,18 @@ void ProcessFrame(uint8_t *buf)
         return;
 
     uint32_t freq  = buf[1]+(buf[2] << 8)+(buf[3]<<16);
-    uint8_t amp   = buf[4];
-    uint16_t phase = buf[5] + (buf[6] << 8);
-    uint8_t crc   = buf[7];
+    uint8_t amp1   = buf[4];
+    uint8_t harm1   = buf[5];
+    uint8_t amp2   = buf[6];
+    uint8_t harm2   = buf[7];
+    uint16_t phase = buf[8] + (buf[9] << 8);
+    uint8_t crc   = buf[10];
 
     uint8_t calc = CalcCRC(buf);
     if (calc != crc){
         return;}
 
-    SetFrequency(freq,amp,phase);
+    SetFrequency(freq,amp1,harm1,amp2,harm2,phase);
 }
 
 /* USER CODE END 0 */
@@ -279,8 +286,7 @@ int main(void)
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
-  GenerateSineTable();
-  UpdateScaledTable();
+  GenerateSineTable(1,1,1,1);
   HAL_TIM_Base_Start(&htim6);
   HAL_TIM_Base_Start(&htim2);
   HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
@@ -366,7 +372,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         else
         {
             frame_buf[frame_index++] = b;
-            if (frame_index >= 8)
+            if (frame_index >= FRAME_SIZE)
             {
                 receiving = 0;
                 ProcessFrame(frame_buf);
